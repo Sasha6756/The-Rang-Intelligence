@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # CORS
     FRONTEND_ORIGIN: str = "http://localhost:3000"
 
+    # If true, populates the demo dataset on startup when the database is
+    # empty. Safe to leave on — it's a no-op once a property already exists.
+    SEED_DEMO_DATA: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:
