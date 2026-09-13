@@ -10,6 +10,7 @@ import app.models  # noqa: F401  (ensures all models are registered on Base.meta
 
 from app.routers import auth, properties, imports, reservations, analytics, recommendations, reviews, guests, reports, competitors, dashboard
 
+
 settings = get_settings()
 
 DEFAULT_CHANNELS = [
