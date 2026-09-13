@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI 
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
@@ -9,7 +9,6 @@ from app.models.core import Channel
 import app.models  # noqa: F401  (ensures all models are registered on Base.metadata)
 
 from app.routers import auth, properties, imports, reservations, analytics, recommendations, reviews, guests, reports, competitors, dashboard
-
 
 settings = get_settings()
 
@@ -37,6 +36,9 @@ def seed_channels():
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     seed_channels()
+    if settings.SEED_DEMO_DATA:
+        from app.seed.demo_data import generate as generate_demo_data
+        generate_demo_data()  # idempotent — skips if a demo property already exists
     yield
 
 
@@ -66,3 +68,12 @@ app.include_router(dashboard.router)
 @app.get("/api/health")
 def health():
     return {"status": "ok", "app": settings.APP_NAME}
+
+
+@app.get("/api/debug/cors")
+def debug_cors():
+    return {
+        "frontend_origin_repr": repr(settings.FRONTEND_ORIGIN),
+        "frontend_origin_len": len(settings.FRONTEND_ORIGIN),
+        "allow_origins_configured": [settings.FRONTEND_ORIGIN, "http://localhost:3000"],
+    }
