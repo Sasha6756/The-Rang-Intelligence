@@ -72,7 +72,7 @@ export default function ImportWizard({ onImported }: { onImported?: () => void }
   }
 
   return (
-    <div className="bg-warmwhite border border-taupedark/50 rounded-lg p-6 shadow-card">
+    <div className="bg-warmwhite border border-taupedark/50 rounded-2xl p-6 shadow-card">
       <h3 className="text-sm font-medium mb-4">Import data</h3>
 
       <div className="flex flex-wrap gap-3 items-end mb-4">
@@ -85,7 +85,7 @@ export default function ImportWizard({ onImported }: { onImported?: () => void }
               setPreview(null);
               setResult(null);
             }}
-            className="border border-taupedark rounded-md px-3 py-2 text-sm bg-white"
+            className="border border-taupedark rounded-lg px-3 py-2 text-sm bg-white"
           >
             {SOURCE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
@@ -108,7 +108,7 @@ export default function ImportWizard({ onImported }: { onImported?: () => void }
         <button
           onClick={runPreview}
           disabled={!file || loading}
-          className="text-xs px-4 py-2 rounded-md bg-charcoal text-warmwhite hover:bg-bronzedark disabled:opacity-50"
+          className="text-xs px-4 py-2 rounded-lg bg-charcoal text-warmwhite hover:bg-bronzedark disabled:opacity-50"
         >
           {loading ? "Working…" : "Preview"}
         </button>
@@ -117,7 +117,7 @@ export default function ImportWizard({ onImported }: { onImported?: () => void }
       {error && <p className="text-sm text-terracotta mb-3">{error}</p>}
 
       {result && (
-        <div className="bg-sage/10 border border-sage/30 rounded-md px-4 py-3 text-sm mb-4">
+        <div className="bg-sage/10 border border-sage/30 rounded-lg px-4 py-3 text-sm mb-4">
           Imported {result.rows_imported} rows.
           {result.warnings.length > 0 && (
             <details className="mt-1 text-xs text-muted">
@@ -147,7 +147,7 @@ export default function ImportWizard({ onImported }: { onImported?: () => void }
                   <select
                     value={mapping[field] || ""}
                     onChange={(e) => setMapping({ ...mapping, [field]: e.target.value || null })}
-                    className="flex-1 border border-taupedark rounded-md px-2 py-1 bg-white text-sm"
+                    className="flex-1 border border-taupedark rounded-lg px-2 py-1 bg-white text-sm"
                   >
                     <option value="">— not mapped —</option>
                     {preview.headers.map((h: string) => (
@@ -168,7 +168,7 @@ export default function ImportWizard({ onImported }: { onImported?: () => void }
             </details>
           )}
 
-          <div className="overflow-x-auto mb-4 border border-taupedark/40 rounded-md">
+          <div className="overflow-x-auto mb-4 border border-taupedark/40 rounded-lg">
             <table className="text-xs w-full">
               <thead className="bg-taupe/50">
                 <tr>{preview.headers.map((h: string) => <th key={h} className="px-2 py-1.5 text-left font-medium">{h}</th>)}</tr>
@@ -183,7 +183,7 @@ export default function ImportWizard({ onImported }: { onImported?: () => void }
             </table>
           </div>
 
-          <button onClick={runCommit} disabled={loading} className="text-xs px-4 py-2 rounded-md bg-charcoal text-warmwhite hover:bg-bronzedark disabled:opacity-50">
+          <button onClick={runCommit} disabled={loading} className="text-xs px-4 py-2 rounded-lg bg-charcoal text-warmwhite hover:bg-bronzedark disabled:opacity-50">
             {loading ? "Importing…" : `Confirm & import ${preview.valid_row_count} rows`}
           </button>
         </div>

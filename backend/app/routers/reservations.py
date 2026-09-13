@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user
 from app.db.database import get_db
-from app.models.core import User
+from app.models.core import User, Property
 from app.models.booking import Reservation, ReservationStatus
+from app.services import currency_service as csvc
 
 router = APIRouter(prefix="/api/reservations", tags=["reservations"])
 
@@ -16,6 +17,8 @@ def list_reservations(
     start: date | None = None,
     end: date | None = None,
     status: str | None = None,
+    currency: str | None = Query(None),
+    rate_mode: str = Query("current"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -28,7 +31,7 @@ def list_reservations(
         q = q.filter(Reservation.status == status)
     reservations = q.order_by(Reservation.arrival_date).all()
 
-    return [
+    result = [
         {
             "id": r.id,
             "channel_name": r.channel.name if r.channel else "Unknown",
@@ -47,15 +50,32 @@ def list_reservations(
             "lead_time_days": r.lead_time_days,
             "currency": r.currency,
             "status": r.status.value,
+            "is_calendar_sync": r.is_calendar_sync,
+            # Captured before any conversion below — the amount and currency exactly
+            # as stored on the reservation record. Never overwritten, regardless of
+            # which display currency was requested; shown in the UI so a viewer can
+            # always see the true original transaction figure alongside the converted one.
+            "original_amount": r.gross_revenue,
+            "original_currency": r.currency,
         }
         for r in reservations
     ]
+
+    prop = db.get(Property, current_user.property_id)
+    display = (currency or prop.currency).upper()
+    if display != prop.currency.upper():
+        csvc.convert_money_in_place(db, result, prop.currency, display, rate_mode)
+        for row in result:
+            row["currency"] = display  # the per-row original currency is superseded by the requested display currency
+            # original_amount/original_currency intentionally left untouched by conversion
+    return result
 
 
 @router.get("/calendar")
 def calendar_view(
     start: date = Query(...),
     end: date = Query(...),
+    currency: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -84,4 +104,9 @@ def calendar_view(
                 days[cur].update(is_booked=True, adr=r.adr, guest_country=r.guest.country if r.guest else None)
             cur += timedelta(days=1)
 
-    return list(days.values())
+    result = list(days.values())
+    prop = db.get(Property, current_user.property_id)
+    display = (currency or prop.currency).upper()
+    if display != prop.currency.upper():
+        csvc.convert_money_in_place(db, result, prop.currency, display, "current")
+    return result

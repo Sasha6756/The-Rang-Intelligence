@@ -5,23 +5,35 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        cream: "#FAF7F2",
-        warmwhite: "#FFFDF9",
-        charcoal: "#2B2825",
-        taupe: "#EFE9E1",
-        taupedark: "#DCD3C6",
-        bronze: "#A47B4E",
-        bronzedark: "#8A6539",
-        sage: "#6E7A64",
-        terracotta: "#B5654A",
-        muted: "#8A8378",
+        // Base surfaces
+        cream: "#F6F1E7",       // page background — warm ivory
+        warmwhite: "#FFFFFF",   // card surfaces
+        // Secondary / sunken surfaces & borders
+        taupe: "#EFE8D9",
+        taupedark: "#DDD2BC",
+        // Text
+        charcoal: "#221F1B",    // primary text
+        ink: "#161310",         // headings, near-black
+        muted: "#8C8271",       // secondary text, warm grey
+        // Accent — muted sand, never a strong/saturated gold
+        bronze: "#A3814F",
+        bronzedark: "#84663C",
+        // Chart / status — deliberately muted, editorial, never saturated
+        sage: "#74805F",        // muted green — positive
+        steel: "#6C8299",       // muted blue — neutral
+        clay: "#BE8657",        // muted orange — attention
+        terracotta: "#A8583F",  // muted rust — negative/risk
       },
       fontFamily: {
-        serif: ["Georgia", "Iowan Old Style", "Times New Roman", "serif"],
-        sans: ["-apple-system", "Inter", "Helvetica Neue", "Arial", "sans-serif"],
+        serif: ["var(--font-serif)", "Iowan Old Style", "Georgia", "serif"],
+        sans: ["var(--font-sans)", "-apple-system", "Helvetica Neue", "Arial", "sans-serif"],
       },
       boxShadow: {
-        card: "0 1px 2px rgba(43,40,37,0.04), 0 4px 16px rgba(43,40,37,0.05)",
+        card: "0 1px 2px rgba(22,19,16,0.04), 0 6px 20px rgba(22,19,16,0.05)",
+        lift: "0 2px 4px rgba(22,19,16,0.05), 0 12px 32px rgba(22,19,16,0.08)",
+      },
+      letterSpacing: {
+        widest2: "0.22em",
       },
     },
   },

@@ -39,7 +39,7 @@ export default function LoginPage() {
           <p className="text-sm text-muted mt-2">Revenue, Guest & Experience Intelligence</p>
         </div>
 
-        <form onSubmit={submit} className="bg-warmwhite border border-taupedark/60 rounded-lg p-8 shadow-card space-y-4">
+        <form onSubmit={submit} className="bg-warmwhite border border-taupedark/60 rounded-2xl p-8 shadow-card space-y-4">
           <div>
             <label className="block text-xs uppercase tracking-wide text-muted mb-1">Email</label>
             <input
@@ -47,7 +47,7 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full border border-taupedark rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-bronze"
+              className="w-full border border-taupedark rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-bronze"
             />
           </div>
           <div>
@@ -57,14 +57,14 @@ export default function LoginPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full border border-taupedark rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-bronze"
+              className="w-full border border-taupedark rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-bronze"
             />
           </div>
           {error && <p className="text-sm text-terracotta">{error}</p>}
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-charcoal text-warmwhite rounded-md py-2.5 text-sm tracking-wide hover:bg-bronzedark transition disabled:opacity-60"
+            className="w-full bg-charcoal text-warmwhite rounded-lg py-2.5 text-sm tracking-wide hover:bg-bronzedark transition disabled:opacity-60"
           >
             {loading ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
           </button>

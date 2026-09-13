@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user
@@ -9,12 +9,17 @@ from app.models.core import User, Property
 from app.models.booking import Reservation, ReservationStatus
 from app.models.recommendation import Recommendation
 from app.services import analytics_service as asvc
+from app.services import currency_service as csvc
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
 @router.get("/today")
-def today(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def today(
+    currency: str | None = Query(None, description="Display currency (IDR/AUD/USD/EUR). Defaults to the property's base currency."),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     prop = db.get(Property, current_user.property_id)
     today_date = date.today()
 
@@ -58,11 +63,13 @@ def today(current_user: User = Depends(get_current_user), db: Session = Depends(
         .all()
     )
 
-    return {
+    display_currency = (currency or prop.currency).upper()
+    payload = {
         "property_name": prop.name,
         "target_occupancy_pct": prop.target_occupancy_pct,
         "target_adr": prop.target_adr,
-        "currency": prop.currency,
+        "currency": display_currency,
+        "base_currency": prop.currency,
         "current_occupancy_today_pct": current["occupancy_pct"],
         "next_30_days_occupancy_pct": next_30["occupancy_pct"],
         "next_30_days_revenue": next_30["gross_revenue"],
@@ -77,7 +84,11 @@ def today(current_user: User = Depends(get_current_user), db: Session = Depends(
                 "id": r.id, "category": r.category, "severity": r.severity,
                 "observation": r.observation, "interpretation": r.interpretation,
                 "action": r.action, "expected_impact": r.expected_impact, "confidence": r.confidence,
+                "target_start_date": r.target_start_date, "target_end_date": r.target_end_date,
             }
             for r in open_recs
         ],
     }
+    if display_currency != prop.currency.upper():
+        csvc.convert_money_in_place(db, payload, prop.currency, display_currency, "current")
+    return payload

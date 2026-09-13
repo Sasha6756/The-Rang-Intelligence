@@ -1,27 +1,94 @@
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/fraunces/400.css";
+@import "@fontsource/fraunces/500.css";
+@import "@fontsource/fraunces/600.css";
+@import "@fontsource/fraunces/400-italic.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --font-sans: "Inter", -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Fraunces", "Iowan Old Style", Georgia, serif;
+}
+
 html, body {
-  background-color: #FAF7F2;
-  color: #2B2825;
+  background-color: #F6F1E7;
+  color: #221F1B;
 }
 
 body {
-  font-family: -apple-system, "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum" 1, "cv11" 1;
 }
 
 h1, h2, h3, .font-display {
-  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  font-family: var(--font-serif);
+  letter-spacing: -0.01em;
+}
+
+/* Tabular numerals for anything that behaves like a data figure */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
 ::selection {
-  background: #EFE9E1;
+  background: #EFE8D9;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #DDD2BC;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .severity-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
+}
+
+/* Recharts cleanup — thin, quiet, editorial rather than default SaaS-chart look */
+.recharts-cartesian-axis-tick text {
+  fill: #8C8271;
+  font-family: var(--font-sans);
+}
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #EFE8D9;
+}
+.recharts-tooltip-wrapper {
+  outline: none;
+}
+.recharts-default-tooltip {
+  border-radius: 10px !important;
+  border: 1px solid #DDD2BC !important;
+  box-shadow: 0 8px 24px rgba(22,19,16,0.08);
+}
+
+/* Calendar cell states */
+.cal-cell {
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 6px 7px;
+  position: relative;
+  transition: transform 120ms ease;
+}
+.cal-cell:hover {
+  transform: translateY(-1px);
 }

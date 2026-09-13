@@ -7,6 +7,7 @@ class PropertyOut(BaseModel):
     address: str
     bedrooms: int
     currency: str
+    default_display_currency: str | None = None
     timezone: str
     target_occupancy_pct: float
     target_adr: float
@@ -21,6 +22,7 @@ class PropertyUpdate(BaseModel):
     address: str | None = None
     bedrooms: int | None = None
     currency: str | None = None
+    default_display_currency: str | None = None
     timezone: str | None = None
     target_occupancy_pct: float | None = None
     target_adr: float | None = None

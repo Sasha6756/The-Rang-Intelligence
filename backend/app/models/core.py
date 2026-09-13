@@ -20,7 +20,23 @@ class Property(Base):
     name: Mapped[str] = mapped_column(String(200), default="The Rang Uluwatu")
     address: Mapped[str] = mapped_column(String(300), default="Uluwatu, Bali, Indonesia")
     bedrooms: Mapped[int] = mapped_column(Integer, default=5)
-    currency: Mapped[str] = mapped_column(String(10), default="USD")
+
+    # The property's operating/base currency — the currency financial figures
+    # are actually recorded and calculated in (target_adr, reservation
+    # amounts, pricing recommendations). Defaults to IDR since The Rang
+    # operates in Indonesia and most local pricing/cost inputs originate in
+    # Rupiah; existing properties keep whatever currency they were created
+    # with (changing this default does not retroactively touch stored data).
+    currency: Mapped[str] = mapped_column(String(10), default="IDR")
+
+    # The currency the dashboard displays by default when a viewer hasn't
+    # picked one for this browser session. Nullable — falls back to
+    # `currency` (the base currency) when unset. Never used to convert or
+    # overwrite stored amounts; purely a display preference (see
+    # currency_service.convert_money_in_place, which is applied fresh on
+    # every request from the true stored base-currency figures).
+    default_display_currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
     timezone: Mapped[str] = mapped_column(String(50), default="Asia/Makassar")
     target_occupancy_pct: Mapped[float] = mapped_column(Float, default=65.0)
     target_adr: Mapped[float] = mapped_column(Float, default=1450.0)

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.core import Property
 from app.models.recommendation import Recommendation
 from app.services import analytics_service as asvc
+from app.services import currency_service as csvc
 
 
 def generate_weekly_report(db: Session, property_id: int) -> dict:
@@ -45,6 +46,7 @@ def generate_weekly_report(db: Session, property_id: int) -> dict:
 
     return {
         "property_name": prop.name,
+        "currency": prop.currency,
         "generated_at": today,
         "period": {"start": week_start, "end": week_end},
         "performance": this_week,
@@ -61,16 +63,18 @@ def generate_weekly_report(db: Session, property_id: int) -> dict:
 
 def render_markdown(report: dict) -> str:
     p = report["performance"]
+    currency = report.get("currency", "")
+    fmt = lambda v: csvc.format_money(v, currency) if currency else (f"{v:,.0f}" if v is not None else "—")
     lines = [
         f"# {report['property_name']} — Weekly Intelligence",
         f"_Generated {report['generated_at']:%d %b %Y} — covering {report['period']['start']:%d %b} to {report['period']['end']:%d %b}_",
         "",
         "## Performance",
         f"- Occupancy: {p['occupancy_pct']}% ({report['occupancy_change_pts']:+.1f} pts vs prior week)",
-        f"- ADR: {p['adr']:,.0f} {p.get('currency', '')}".rstrip(),
-        f"- Gross revenue: {p['gross_revenue']:,.0f}"
+        f"- ADR: {fmt(p['adr'])}",
+        f"- Gross revenue: {fmt(p['gross_revenue'])}"
         + (f" ({report['revenue_change_pct']:+.1f}% vs prior week)" if report["revenue_change_pct"] is not None else ""),
-        f"- RevPAR: {p['revpar']:,.0f}",
+        f"- RevPAR: {fmt(p['revpar'])}",
         "",
         "## Biggest opportunity",
         (report["biggest_opportunity"].action if report["biggest_opportunity"] else "No standout opportunity flagged this week."),

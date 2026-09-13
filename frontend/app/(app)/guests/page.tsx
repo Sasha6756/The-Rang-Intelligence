@@ -2,81 +2,92 @@
 
 import { useEffect, useState } from "react";
 import { apiGet } from "@/lib/api";
-import { formatCurrency, formatPct } from "@/lib/format";
+import { formatPct } from "@/lib/format";
+import { useCurrency, formatMoney } from "@/lib/currency";
 
 export default function GuestsPage() {
+  const { displayCurrency, rateMode, withCurrency } = useCurrency();
   const [segments, setSegments] = useState<any[]>([]);
   const [countries, setCountries] = useState<any[]>([]);
 
   useEffect(() => {
-    apiGet("/api/guests/segments").then(setSegments);
-    apiGet("/api/guests/country-mix").then(setCountries);
-  }, []);
+    apiGet(withCurrency("/api/guests/segments")).then(setSegments);
+    apiGet(withCurrency("/api/guests/country-mix")).then(setCountries);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayCurrency, rateMode]);
 
-  const mostValuable = [...segments].sort((a, b) => b.avg_booking_value - a.avg_booking_value)[0];
-  const easiestToConvert = [...segments].sort((a, b) => a.avg_lead_time_days - b.avg_lead_time_days)[0];
+  const priced = segments.filter((s) => s.avg_booking_value !== null);
+  const mostValuable = [...priced].sort((a, b) => b.avg_booking_value - a.avg_booking_value)[0];
+  const withLead = segments.filter((s) => s.avg_lead_time_days !== null);
+  const easiestToConvert = [...withLead].sort((a, b) => a.avg_lead_time_days - b.avg_lead_time_days)[0];
 
   return (
     <div>
-      <h1 className="font-serif text-3xl mb-1">Guests</h1>
+      <h1 className="font-serif text-3xl text-ink mb-1">Guests</h1>
       <p className="text-muted text-sm mb-8">Rule-based segmentation from your reservation history — auditable, not a black box.</p>
 
-      {segments.length > 0 && (
+      {(mostValuable || easiestToConvert) && (
         <div className="grid md:grid-cols-2 gap-4 mb-8">
-          <div className="bg-warmwhite border border-taupedark/50 rounded-lg p-5 shadow-card">
-            <div className="text-[11px] uppercase tracking-wide text-bronze mb-1">Most valuable segment</div>
-            <div className="font-serif text-lg">{mostValuable.segment}</div>
-            <p className="text-sm text-muted mt-1">Average booking value {formatCurrency(mostValuable.avg_booking_value)}, {mostValuable.avg_length_of_stay} night average stay.</p>
-          </div>
-          <div className="bg-warmwhite border border-taupedark/50 rounded-lg p-5 shadow-card">
-            <div className="text-[11px] uppercase tracking-wide text-bronze mb-1">Easiest to convert directly</div>
-            <div className="font-serif text-lg">{easiestToConvert.segment}</div>
-            <p className="text-sm text-muted mt-1">Average lead time of just {easiestToConvert.avg_lead_time_days} days — worth targeting with direct campaigns.</p>
-          </div>
+          {mostValuable && (
+            <div className="bg-warmwhite border border-taupedark/50 rounded-2xl p-5">
+              <div className="text-[10.5px] uppercase tracking-wide text-bronze mb-1">Most valuable segment</div>
+              <div className="font-serif text-lg text-ink">{mostValuable.segment}</div>
+              <p className="text-sm text-muted mt-1">
+                Average booking value {formatMoney(mostValuable.avg_booking_value, displayCurrency)}, {mostValuable.avg_length_of_stay} night average stay.
+              </p>
+            </div>
+          )}
+          {easiestToConvert && (
+            <div className="bg-warmwhite border border-taupedark/50 rounded-2xl p-5">
+              <div className="text-[10.5px] uppercase tracking-wide text-bronze mb-1">Easiest to convert directly</div>
+              <div className="font-serif text-lg text-ink">{easiestToConvert.segment}</div>
+              <p className="text-sm text-muted mt-1">Average lead time of just {easiestToConvert.avg_lead_time_days} days — worth targeting with direct campaigns.</p>
+            </div>
+          )}
         </div>
       )}
 
-      <div className="overflow-x-auto border border-taupedark/40 rounded-lg mb-10">
+      <div className="overflow-x-auto bg-warmwhite border border-taupedark/50 rounded-2xl mb-10">
         <table className="text-sm w-full">
-          <thead className="bg-taupe/50">
+          <thead className="bg-taupe/50 text-[10.5px] uppercase tracking-wide text-muted">
             <tr>
               {["Segment", "Reservations", "Avg stay", "Avg lead time", "Avg value", "Total revenue", "Cancellation rate"].map((h) => (
-                <th key={h} className="px-3 py-2 text-left font-medium text-xs">{h}</th>
+                <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {segments.map((s) => (
               <tr key={s.segment} className="border-t border-taupedark/30">
-                <td className="px-3 py-2">{s.segment}</td>
-                <td className="px-3 py-2">{s.reservation_count}</td>
-                <td className="px-3 py-2">{s.avg_length_of_stay} nights</td>
-                <td className="px-3 py-2">{s.avg_lead_time_days} days</td>
-                <td className="px-3 py-2">{formatCurrency(s.avg_booking_value)}</td>
-                <td className="px-3 py-2">{formatCurrency(s.total_revenue)}</td>
-                <td className="px-3 py-2">{formatPct(s.cancellation_rate_pct)}</td>
+                <td className="px-4 py-3 text-charcoal">{s.segment}</td>
+                <td className="px-4 py-3 text-muted">{s.reservation_count}</td>
+                <td className="px-4 py-3 text-muted">{s.avg_length_of_stay ?? "—"} nights</td>
+                <td className="px-4 py-3 text-muted">{s.avg_lead_time_days ?? "—"} days</td>
+                <td className="px-4 py-3 text-charcoal tnum">{formatMoney(s.avg_booking_value, displayCurrency)}</td>
+                <td className="px-4 py-3 text-charcoal tnum">{formatMoney(s.total_revenue, displayCurrency)}</td>
+                <td className="px-4 py-3 text-muted">{formatPct(s.cancellation_rate_pct)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <h3 className="text-sm font-medium mb-3">Top guest countries</h3>
-      <div className="overflow-x-auto border border-taupedark/40 rounded-lg">
+      <h3 className="text-sm font-medium text-ink mb-3">Top guest countries</h3>
+      <div className="overflow-x-auto bg-warmwhite border border-taupedark/50 rounded-2xl">
         <table className="text-sm w-full">
-          <thead className="bg-taupe/50">
+          <thead className="bg-taupe/50 text-[10.5px] uppercase tracking-wide text-muted">
             <tr>
-              <th className="px-3 py-2 text-left font-medium text-xs">Country</th>
-              <th className="px-3 py-2 text-left font-medium text-xs">Reservations</th>
-              <th className="px-3 py-2 text-left font-medium text-xs">Revenue</th>
+              <th className="px-4 py-3 text-left font-medium">Country</th>
+              <th className="px-4 py-3 text-left font-medium">Reservations</th>
+              <th className="px-4 py-3 text-left font-medium">Revenue</th>
             </tr>
           </thead>
           <tbody>
             {countries.map((c) => (
               <tr key={c.country} className="border-t border-taupedark/30">
-                <td className="px-3 py-2">{c.country}</td>
-                <td className="px-3 py-2">{c.reservations}</td>
-                <td className="px-3 py-2">{formatCurrency(c.revenue)}</td>
+                <td className="px-4 py-3 text-charcoal">{c.country}</td>
+                <td className="px-4 py-3 text-muted">{c.reservations}</td>
+                <td className="px-4 py-3 text-charcoal tnum">{formatMoney(c.revenue, displayCurrency)}</td>
               </tr>
             ))}
           </tbody>
