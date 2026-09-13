@@ -19,6 +19,10 @@ SOURCE_TO_CHANNEL = {
     "booking_com": "Booking.com",
     "airbnb": "Airbnb",
     "direct": "Direct",
+    # A ledger covering every channel in one sheet, with its own per-row
+    # "Source" column — "Other" here is only the fallback for a row whose
+    # Source cell doesn't map to anything (see _normalize_channel_source).
+    "mixed": "Other",
 }
 
 SOURCE_TO_REVIEW_LABEL = {

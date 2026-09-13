@@ -7,6 +7,7 @@ const SOURCE_OPTIONS = [
   { value: "booking_com", label: "Booking.com — reservations" },
   { value: "airbnb", label: "Airbnb — reservations" },
   { value: "direct", label: "Direct bookings — reservations" },
+  { value: "mixed", label: "All channels — reservations (Source column per row)" },
   { value: "reviews_booking_com", label: "Booking.com — reviews" },
   { value: "reviews_airbnb", label: "Airbnb — reviews" },
   { value: "reviews_google", label: "Google — reviews" },
@@ -164,7 +165,10 @@ export default function ImportWizard({ onImported }: { onImported?: () => void }
       {mode === "sheet" && (
         <p className="text-xs text-muted mb-4 -mt-2">
           The sheet needs to be shared as "Anyone with the link" (Viewer) — in Google Sheets, click Share, change
-          access, then paste the link above. We only read it, nothing is ever written back to your sheet.
+          access, then paste the link above. If your spreadsheet has more than one tab, click on the specific tab
+          with your booking data first, then copy the link from your browser's address bar — that way it opens
+          the right one instead of whichever tab happens to be first. We only read it, nothing is ever written
+          back to your sheet.
         </p>
       )}
 

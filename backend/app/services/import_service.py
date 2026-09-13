@@ -9,6 +9,7 @@ after the caller has confirmed a mapping (either auto-suggested or edited).
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import re
 from datetime import date, datetime, timedelta
@@ -30,6 +31,13 @@ RESERVATION_FIELDS = [
     "external_ref", "booking_date", "arrival_date", "departure_date",
     "guest_name", "guest_country", "adults", "children",
     "gross_revenue", "commission", "currency", "status", "cancellation_date",
+    # Optional — most single-channel exports (a Booking.com/Airbnb download)
+    # don't have these at all, but a hand-kept ledger covering every channel
+    # often has its own "Source" column per row; when mapped, it overrides
+    # the single channel picked in the UI on a per-row basis (see
+    # validate_reservations / commit_reservations). "notes" maps straight
+    # through to Reservation.source_detail.
+    "channel", "notes",
 ]
 
 REVIEW_FIELDS = ["review_date", "rating", "guest_country", "raw_text"]
@@ -46,6 +54,7 @@ FIELDS_BY_SOURCE = {
     "booking_com": RESERVATION_FIELDS,
     "airbnb": RESERVATION_FIELDS,
     "direct": RESERVATION_FIELDS,
+    "mixed": RESERVATION_FIELDS,
     "reviews": REVIEW_FIELDS,
     "competitor_rates": COMPETITOR_RATE_FIELDS,
     "revenue": REVENUE_FIELDS,
@@ -54,18 +63,20 @@ FIELDS_BY_SOURCE = {
 # common header synonyms -> system field, used for auto-suggestion
 SYNONYMS: dict[str, list[str]] = {
     "booking_date": ["booking date", "reservation created", "reservation date", "date booked", "created"],
-    "arrival_date": ["arrival", "arrival date", "check-in", "check in", "checkin date", "start date"],
-    "departure_date": ["departure", "departure date", "check-out", "check out", "checkout date", "end date"],
-    "guest_name": ["guest", "guest name", "customer", "customer name", "name"],
+    "arrival_date": ["arrival", "arrival date", "check-in", "check in", "checkin date", "start date", "stay from"],
+    "departure_date": ["departure", "departure date", "check-out", "check out", "checkout date", "end date", "stay to"],
+    "guest_name": ["guest", "guest name", "customer", "customer name", "name", "guest / booking", "guest/booking"],
     "guest_country": ["country", "guest country", "nationality"],
     "adults": ["adults", "guests", "number of guests", "pax", "occupancy"],
     "children": ["children", "kids"],
-    "gross_revenue": ["amount", "gross revenue", "total price", "total amount", "revenue", "price", "payout amount"],
+    "gross_revenue": ["amount", "gross revenue", "total price", "total amount", "revenue", "price", "payout amount", "amount received", "total guest paid"],
     "commission": ["commission", "commission amount", "service fee", "ota commission"],
-    "currency": ["currency"],
+    "currency": ["currency", "currency received"],
     "status": ["status", "reservation status", "booking status"],
     "cancellation_date": ["cancellation date", "cancelled date", "date cancelled"],
     "external_ref": ["reservation id", "confirmation code", "booking id", "reservation number", "id"],
+    "channel": ["source", "channel", "booking source", "platform"],
+    "notes": ["notes", "note", "comment", "comments", "remarks"],
     "review_date": ["review date", "date", "submitted"],
     "rating": ["rating", "score", "overall rating"],
     "raw_text": ["review", "comment", "review text", "feedback", "text"],
@@ -93,25 +104,99 @@ def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, _norm(a), _norm(b)).ratio()
 
 
-def parse_file(filename: str, content: bytes) -> tuple[list[str], list[dict]]:
-    """Returns (headers, rows-as-dicts-of-strings)."""
+_SUBTOTAL_ROW_RE = re.compile(r"^subtotal$", re.IGNORECASE)
+# Matches a hand-kept ledger's month-section header, e.g. "March 2026   (8 bookings)".
+_SECTION_HEADER_ROW_RE = re.compile(r"^[a-z]+\s+\d{4}\s*\(\d+\s*bookings?\)$", re.IGNORECASE)
+
+
+def _all_known_header_phrases(source_type: str | None) -> set[str]:
+    """Normalized header text for every synonym of every system field —
+    either just the fields relevant to `source_type`, or (when not given)
+    every field across every source, for a source-agnostic best guess."""
+    fields = FIELDS_BY_SOURCE.get(source_type) if source_type else None
+    field_names = fields if fields else {f for flds in FIELDS_BY_SOURCE.values() for f in flds}
+    phrases: set[str] = set()
+    for f in field_names:
+        phrases.add(_norm(f.replace("_", " ")))
+        for syn in SYNONYMS.get(f, []):
+            phrases.add(_norm(syn))
+    return phrases
+
+
+def _score_header_row(cells: list[str], phrases: set[str]) -> int:
+    return sum(1 for c in cells if _norm(c) in phrases)
+
+
+def _detect_header_row(grid: list[list[str]], source_type: str | None, scan_rows: int = 20) -> int:
+    """Almost every real-world export puts the header on row 1 — but a
+    hand-maintained business spreadsheet often has a title and instructions
+    above the real header row (see the "Bookings Income" ledger format).
+    Scans the first `scan_rows` rows and picks whichever looks most like a
+    real header — by how many cells match a known system-field name or
+    synonym — defaulting to row 0 unless a later row is a clearly better
+    match, so ordinary files (header genuinely on row 1) are unaffected."""
+    if not grid:
+        return 0
+    phrases = _all_known_header_phrases(source_type)
+    best_idx, best_score = 0, _score_header_row(grid[0], phrases)
+    for idx, row in enumerate(grid[1:scan_rows], start=1):
+        score = _score_header_row(row, phrases)
+        if score > best_score:
+            best_idx, best_score = idx, score
+    return best_idx
+
+
+def _is_decorative_row(row: dict) -> bool:
+    """True for a row that isn't data at all: fully blank, a "Subtotal"
+    line, or a month-section header — all common in a hand-kept ledger
+    that groups bookings under monthly headings with a running subtotal.
+    Filtering these out here (rather than letting them fall through to
+    validate_reservations as "missing date" warnings) keeps the warning
+    list focused on rows that actually need attention.
+
+    A Subtotal row usually has plenty of non-empty cells of its own — the
+    month's totals, the "days left to book" note, the minimum-rate formula
+    — so counting non-empty cells doesn't identify it. What's reliable is
+    that its label ("Subtotal", or the month heading) always sits in the
+    first column, the same column a real row would put its booking/arrival
+    date in — which is itself never going to look like either pattern."""
+    values = list(row.values())
+    non_empty = [v.strip() for v in values if isinstance(v, str) and v.strip()]
+    if not non_empty:
+        return True
+    first_cell = values[0].strip() if isinstance(values[0], str) else ""
+    return bool(_SUBTOTAL_ROW_RE.match(first_cell) or _SECTION_HEADER_ROW_RE.match(first_cell))
+
+
+def _rows_from_grid(grid: list[list[str]], source_type: str | None) -> tuple[list[str], list[dict]]:
+    header_idx = _detect_header_row(grid, source_type)
+    headers = [h.strip() for h in grid[header_idx]]
+    rows = []
+    for raw in grid[header_idx + 1:]:
+        row = {headers[i]: (raw[i] if i < len(raw) else "") for i in range(len(headers))}
+        if not _is_decorative_row(row):
+            rows.append(row)
+    return headers, rows
+
+
+def parse_file(filename: str, content: bytes, source_type: str | None = None) -> tuple[list[str], list[dict]]:
+    """Returns (headers, rows-as-dicts-of-strings). `source_type`, when
+    given, narrows header detection to that source's own field vocabulary;
+    omit it to match against every known field (still works, just slightly
+    less targeted)."""
     if filename.lower().endswith((".xlsx", ".xlsm")):
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
         ws = wb.active
-        rows_iter = ws.iter_rows(values_only=True)
-        headers = [str(h).strip() if h is not None else "" for h in next(rows_iter)]
-        rows = []
-        for r in rows_iter:
-            if all(v is None for v in r):
-                continue
-            rows.append({headers[i]: ("" if r[i] is None else str(r[i])) for i in range(len(headers))})
-        return headers, rows
+        grid = [
+            ["" if v is None else str(v) for v in r]
+            for r in ws.iter_rows(values_only=True)
+            if not all(v is None for v in r)
+        ]
+        return _rows_from_grid(grid, source_type)
     else:
         text = content.decode("utf-8-sig", errors="replace")
-        reader = csv.DictReader(io.StringIO(text))
-        headers = reader.fieldnames or []
-        rows = [dict(r) for r in reader]
-        return headers, rows
+        raw_rows = [r for r in csv.reader(io.StringIO(text)) if any(c.strip() for c in r)]
+        return _rows_from_grid(raw_rows, source_type)
 
 
 class GoogleSheetError(Exception):
@@ -186,20 +271,34 @@ def suggest_mapping(headers: list[str], source_type: str, remembered: dict | Non
                 mapping[field] = header
                 used_headers.add(header)
 
-    for field in fields:
-        if field in mapping:
-            continue
+    # Score every remaining (field, header) pair once, then assign in order
+    # of confidence (highest score first) rather than by field declaration
+    # order. Declaration order lets an earlier field grab a header with a
+    # merely-adequate score before a later field that would have matched it
+    # near-perfectly ever gets a turn — e.g. "external_ref" claiming a
+    # "Booking date" column ahead of "booking_date" itself, a real
+    # column-naming collision, not a hypothetical one.
+    remaining_fields = [f for f in fields if f not in mapping]
+    pair_scores: list[tuple[float, str, str]] = []
+    for field in remaining_fields:
         candidates = SYNONYMS.get(field, [field])
-        best_header, best_score = None, 0.0
         for header in headers:
-            if header in used_headers:
-                continue
             score = max(_similarity(header, c) for c in candidates + [field])
-            if score > best_score:
-                best_header, best_score = header, score
-        mapping[field] = best_header if best_score >= 0.6 else None
-        if mapping[field]:
-            used_headers.add(mapping[field])
+            if score >= 0.6:
+                pair_scores.append((score, field, header))
+    pair_scores.sort(key=lambda t: -t[0])
+
+    assigned_fields: set[str] = set()
+    for score, field, header in pair_scores:
+        if field in assigned_fields or header in used_headers:
+            continue
+        mapping[field] = header
+        used_headers.add(header)
+        assigned_fields.add(field)
+
+    for field in remaining_fields:
+        if field not in mapping:
+            mapping[field] = None
 
     return mapping
 
@@ -246,7 +345,19 @@ def validate_reservations(rows: list[dict], mapping: dict[str, str | None]) -> t
         arrival_date = _parse_date(get("arrival_date"))
         departure_date = _parse_date(get("departure_date"))
         gross_revenue = _parse_float(get("gross_revenue"))
-        ext_ref = (get("external_ref") or "").strip() or f"row-{i}"
+        guest_name = (get("guest_name") or "").strip()
+        ext_ref_raw = (get("external_ref") or "").strip()
+        if ext_ref_raw:
+            ext_ref = ext_ref_raw
+        else:
+            # No reservation-ID column mapped — common for a hand-kept
+            # ledger with no confirmation code at all. Derive a stable key
+            # from the booking's own details rather than its row position,
+            # so re-importing the same sheet later (after adding rows
+            # above this one) doesn't shift everyone's identity and create
+            # duplicates.
+            basis = f"{arrival_date}|{departure_date}|{gross_revenue}|{guest_name}"
+            ext_ref = "auto-" + hashlib.sha1(basis.encode()).hexdigest()[:12]
 
         if not arrival_date or not departure_date:
             warnings.append(f"Row {i}: missing/unparseable arrival or departure date — skipped.")
@@ -287,8 +398,10 @@ def validate_reservations(rows: list[dict], mapping: dict[str, str | None]) -> t
             currency=(get("currency") or "USD").strip() or "USD",
             status=status,
             cancellation_date=_parse_date(get("cancellation_date")),
-            guest_name=(get("guest_name") or "").strip(),
+            guest_name=guest_name,
             guest_country=(get("guest_country") or "Unknown").strip() or "Unknown",
+            channel_name=_normalize_channel_source(get("channel")) if (get("channel") or "").strip() else None,
+            source_detail=(get("notes") or "").strip(),
         ))
 
     return clean, warnings
@@ -438,20 +551,48 @@ def get_or_create_channel(db: Session, name: str) -> Channel:
     return channel
 
 
+def _normalize_channel_source(raw: str) -> str:
+    """Maps a free-text source value (as hand-typed in a booking ledger,
+    not a fixed dropdown) to one of the app's canonical channels."""
+    text = raw.strip().lower()
+    if "airbnb" in text:
+        return "Airbnb"
+    if "booking" in text:  # "Booking.com", "Booking.com payout", ...
+        return "Booking.com"
+    if "direct" in text or "website" in text:
+        return "Direct"
+    return "Other"  # word of mouth, Instagram, unrecognized, etc.
+
+
 def commit_reservations(
     db: Session, property_id: int, source_type: str, filename: str,
     clean_rows: list[dict], channel_name: str,
 ) -> ImportBatch:
-    channel = get_or_create_channel(db, channel_name)
+    """`channel_name` is the default/fallback channel for the whole batch —
+    a single-source file (a Booking.com or Airbnb export) uses it for every
+    row. A row can override it individually via `channel_name` in its own
+    clean-row dict (set by validate_reservations when a "channel"/"source"
+    column was mapped), which is how a mixed-source ledger with its own
+    per-row Source column gets each booking filed under the right channel
+    instead of all of them landing under whatever was picked in the UI."""
+    default_channel = get_or_create_channel(db, channel_name)
+    channel_cache: dict[str, Channel] = {channel_name: default_channel}
+
+    def resolve_channel(row_channel_name: str | None) -> Channel:
+        name = row_channel_name or channel_name
+        if name not in channel_cache:
+            channel_cache[name] = get_or_create_channel(db, name)
+        return channel_cache[name]
 
     existing_refs = {
-        r.external_ref for r in db.query(Reservation.external_ref)
-        .filter(Reservation.property_id == property_id, Reservation.channel_id == channel.id).all()
+        (r.channel_id, r.external_ref) for r in db.query(Reservation.channel_id, Reservation.external_ref)
+        .filter(Reservation.property_id == property_id).all()
     }
 
     inserted = 0
     for row in clean_rows:
-        if row["external_ref"] in existing_refs:
+        channel = resolve_channel(row.get("channel_name"))
+        if (channel.id, row["external_ref"]) in existing_refs:
             continue  # duplicate vs. existing database — skip silently-but-counted
         guest = None
         if row["guest_name"] or row["guest_country"] != "Unknown":
@@ -476,8 +617,9 @@ def commit_reservations(
             currency=row["currency"],
             status=row["status"],
             cancellation_date=row["cancellation_date"],
+            source_detail=row.get("source_detail", ""),
         ))
-        existing_refs.add(row["external_ref"])
+        existing_refs.add((channel.id, row["external_ref"]))
         inserted += 1
 
     batch = ImportBatch(

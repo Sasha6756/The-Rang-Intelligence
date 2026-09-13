@@ -15,7 +15,7 @@ from app.services import ical_service
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
-RESERVATION_SOURCES = {"booking_com", "airbnb", "direct"}
+RESERVATION_SOURCES = {"booking_com", "airbnb", "direct", "mixed"}
 REVIEW_SOURCES = set(SOURCE_TO_REVIEW_LABEL.keys())
 
 ICAL_CHANNELS = {"airbnb": "Airbnb", "booking_com": "Booking.com"}
@@ -43,14 +43,14 @@ async def preview_import(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    lookup_key = "reviews" if source_type in REVIEW_SOURCES else ("competitor_rates" if source_type == "competitor_rates" else source_type)
     filename, content = await _read_upload(file, sheet_url)
-    headers, rows = svc.parse_file(filename, content)
+    headers, rows = svc.parse_file(filename, content, lookup_key)
     if not headers:
         raise HTTPException(400, "Could not read any columns from this file.")
 
     mapping_source_key = "reviews" if source_type in REVIEW_SOURCES else source_type
     remembered = svc.get_remembered_mapping(db, current_user.property_id, mapping_source_key)
-    lookup_key = "reviews" if source_type in REVIEW_SOURCES else ("competitor_rates" if source_type == "competitor_rates" else source_type)
     suggested = svc.suggest_mapping(headers, lookup_key, remembered)
 
     system_fields = svc.FIELDS_BY_SOURCE.get(lookup_key, svc.RESERVATION_FIELDS)
@@ -86,8 +86,9 @@ async def commit_import(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    lookup_key = "reviews" if source_type in REVIEW_SOURCES else ("competitor_rates" if source_type == "competitor_rates" else source_type)
     filename, content = await _read_upload(file, sheet_url)
-    headers, rows = svc.parse_file(filename, content)
+    headers, rows = svc.parse_file(filename, content, lookup_key)
     mapping_dict = json.loads(mapping)
 
     if source_type in RESERVATION_SOURCES:

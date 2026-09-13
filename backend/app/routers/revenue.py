@@ -28,7 +28,7 @@ async def _parse_upload(file: UploadFile | None, sheet_url: str | None = None) -
             content = svc.fetch_google_sheet_csv(sheet_url)
         except svc.GoogleSheetError as e:
             raise HTTPException(400, str(e))
-        headers, rows = svc.parse_file("google-sheet.csv", content)
+        headers, rows = svc.parse_file("google-sheet.csv", content, "revenue")
         return headers, rows, None
 
     if file is None:
@@ -42,7 +42,7 @@ async def _parse_upload(file: UploadFile | None, sheet_url: str | None = None) -
             "and every proposed match below before confirming. An Excel/CSV export of the same report, if "
             "your platform offers one, will parse more reliably."
         )
-    headers, rows = svc.parse_file(file.filename, content)
+    headers, rows = svc.parse_file(file.filename, content, "revenue")
     return headers, rows, None
 
 

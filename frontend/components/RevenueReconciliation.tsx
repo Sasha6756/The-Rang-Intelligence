@@ -233,7 +233,10 @@ export default function RevenueReconciliation({ onReconciled }: { onReconciled?:
       {mode === "sheet" && (
         <p className="text-xs text-muted mb-4 -mt-2">
           The sheet needs to be shared as "Anyone with the link" (Viewer) — in Google Sheets, click Share, change
-          access, then paste the link above. We only read it, nothing is ever written back to your sheet.
+          access, then paste the link above. If your spreadsheet has more than one tab, click on the specific tab
+          with your payout data first, then copy the link from your browser's address bar — that way it opens the
+          right one instead of whichever tab happens to be first. We only read it, nothing is ever written back
+          to your sheet.
         </p>
       )}
 
