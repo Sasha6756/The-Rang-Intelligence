@@ -21,15 +21,30 @@ REVIEW_SOURCES = set(SOURCE_TO_REVIEW_LABEL.keys())
 ICAL_CHANNELS = {"airbnb": "Airbnb", "booking_com": "Booking.com"}
 
 
+async def _read_upload(file: UploadFile | None, sheet_url: str | None) -> tuple[str, bytes]:
+    """Returns (filename, content) from either an uploaded file or a pasted
+    Google Sheet link — exactly one of the two should be provided."""
+    if sheet_url:
+        try:
+            content = svc.fetch_google_sheet_csv(sheet_url)
+        except svc.GoogleSheetError as e:
+            raise HTTPException(400, str(e))
+        return "google-sheet.csv", content
+    if file is not None:
+        return file.filename, await file.read()
+    raise HTTPException(400, "Provide a file or a Google Sheet link.")
+
+
 @router.post("/preview")
 async def preview_import(
     source_type: str = Form(...),
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    sheet_url: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    content = await file.read()
-    headers, rows = svc.parse_file(file.filename, content)
+    filename, content = await _read_upload(file, sheet_url)
+    headers, rows = svc.parse_file(filename, content)
     if not headers:
         raise HTTPException(400, "Could not read any columns from this file.")
 
@@ -66,27 +81,28 @@ async def preview_import(
 async def commit_import(
     source_type: str = Form(...),
     mapping: str = Form(...),  # JSON-encoded {field: header}
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    sheet_url: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    content = await file.read()
-    headers, rows = svc.parse_file(file.filename, content)
+    filename, content = await _read_upload(file, sheet_url)
+    headers, rows = svc.parse_file(filename, content)
     mapping_dict = json.loads(mapping)
 
     if source_type in RESERVATION_SOURCES:
         clean, warnings = svc.validate_reservations(rows, mapping_dict)
         channel_name = SOURCE_TO_CHANNEL[source_type]
-        batch = svc.commit_reservations(db, current_user.property_id, source_type, file.filename, clean, channel_name)
+        batch = svc.commit_reservations(db, current_user.property_id, source_type, filename, clean, channel_name)
         svc.save_mapping(db, current_user.property_id, source_type, mapping_dict)
     elif source_type in REVIEW_SOURCES:
         clean, warnings = svc.validate_reviews(rows, mapping_dict)
         label = SOURCE_TO_REVIEW_LABEL[source_type]
-        batch = svc.commit_reviews(db, current_user.property_id, source_type, file.filename, clean, label)
+        batch = svc.commit_reviews(db, current_user.property_id, source_type, filename, clean, label)
         svc.save_mapping(db, current_user.property_id, "reviews", mapping_dict)
     elif source_type == "competitor_rates":
         clean, warnings = svc.validate_competitor_rates(rows, mapping_dict)
-        batch = svc.commit_competitor_rates(db, current_user.property_id, file.filename, clean)
+        batch = svc.commit_competitor_rates(db, current_user.property_id, filename, clean)
         svc.save_mapping(db, current_user.property_id, "competitor_rates", mapping_dict)
     else:
         raise HTTPException(400, f"Unknown source_type '{source_type}'")

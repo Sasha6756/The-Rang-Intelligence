@@ -21,22 +21,38 @@ function authHeaders(): Record<string, string> {
 
 export default function ImportWizard({ onImported }: { onImported?: () => void }) {
   const [sourceType, setSourceType] = useState("booking_com");
+  const [mode, setMode] = useState<"file" | "sheet">("file");
   const [file, setFile] = useState<File | null>(null);
+  const [sheetUrl, setSheetUrl] = useState("");
   const [preview, setPreview] = useState<any>(null);
   const [mapping, setMapping] = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const hasInput = mode === "file" ? !!file : sheetUrl.trim().length > 0;
+
+  function buildForm(extra?: Record<string, string>) {
+    const form = new FormData();
+    form.append("source_type", sourceType);
+    if (mode === "sheet") {
+      form.append("sheet_url", sheetUrl.trim());
+    } else if (file) {
+      form.append("file", file);
+    }
+    if (extra) {
+      for (const [k, v] of Object.entries(extra)) form.append(k, v);
+    }
+    return form;
+  }
+
   async function runPreview() {
-    if (!file) return;
+    if (!hasInput) return;
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const form = new FormData();
-      form.append("source_type", sourceType);
-      form.append("file", file);
+      const form = buildForm();
       const res = await fetch(`${API_URL}/api/imports/preview`, { method: "POST", headers: authHeaders(), body: form });
       if (!res.ok) throw new Error((await res.json()).detail || "Preview failed");
       const data = await res.json();
@@ -50,14 +66,11 @@ export default function ImportWizard({ onImported }: { onImported?: () => void }
   }
 
   async function runCommit() {
-    if (!file) return;
+    if (!hasInput) return;
     setLoading(true);
     setError(null);
     try {
-      const form = new FormData();
-      form.append("source_type", sourceType);
-      form.append("mapping", JSON.stringify(mapping));
-      form.append("file", file);
+      const form = buildForm({ mapping: JSON.stringify(mapping) });
       const res = await fetch(`${API_URL}/api/imports/commit`, { method: "POST", headers: authHeaders(), body: form });
       if (!res.ok) throw new Error((await res.json()).detail || "Import failed");
       const data = await res.json();
@@ -93,26 +106,67 @@ export default function ImportWizard({ onImported }: { onImported?: () => void }
           </select>
         </div>
         <div>
-          <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">File (.csv or .xlsx)</label>
-          <input
-            type="file"
-            accept=".csv,.xlsx,.xlsm"
-            onChange={(e) => {
-              setFile(e.target.files?.[0] || null);
-              setPreview(null);
-              setResult(null);
-            }}
-            className="text-sm"
-          />
+          <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">Source</label>
+          <div className="flex rounded-lg border border-taupedark overflow-hidden text-xs">
+            <button
+              type="button"
+              onClick={() => { setMode("file"); setPreview(null); setResult(null); }}
+              className={`px-3 py-2 ${mode === "file" ? "bg-charcoal text-warmwhite" : "bg-white text-charcoal"}`}
+            >
+              Upload a file
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode("sheet"); setPreview(null); setResult(null); }}
+              className={`px-3 py-2 ${mode === "sheet" ? "bg-charcoal text-warmwhite" : "bg-white text-charcoal"}`}
+            >
+              Google Sheet link
+            </button>
+          </div>
         </div>
+
+        {mode === "file" ? (
+          <div>
+            <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">File (.csv or .xlsx)</label>
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xlsm"
+              onChange={(e) => {
+                setFile(e.target.files?.[0] || null);
+                setPreview(null);
+                setResult(null);
+              }}
+              className="text-sm"
+            />
+          </div>
+        ) : (
+          <div className="flex-1 min-w-[18rem]">
+            <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">Google Sheet link</label>
+            <input
+              type="url"
+              value={sheetUrl}
+              onChange={(e) => { setSheetUrl(e.target.value); setPreview(null); setResult(null); }}
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              className="w-full border border-taupedark rounded-lg px-3 py-2 text-sm bg-white"
+            />
+          </div>
+        )}
+
         <button
           onClick={runPreview}
-          disabled={!file || loading}
+          disabled={!hasInput || loading}
           className="text-xs px-4 py-2 rounded-lg bg-charcoal text-warmwhite hover:bg-bronzedark disabled:opacity-50"
         >
           {loading ? "Working…" : "Preview"}
         </button>
       </div>
+
+      {mode === "sheet" && (
+        <p className="text-xs text-muted mb-4 -mt-2">
+          The sheet needs to be shared as "Anyone with the link" (Viewer) — in Google Sheets, click Share, change
+          access, then paste the link above. We only read it, nothing is ever written back to your sheet.
+        </p>
+      )}
 
       {error && <p className="text-sm text-terracotta mb-3">{error}</p>}
 

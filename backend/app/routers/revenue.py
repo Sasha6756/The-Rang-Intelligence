@@ -19,9 +19,21 @@ def _is_pdf(filename: str) -> bool:
     return filename.lower().endswith(".pdf")
 
 
-async def _parse_upload(file: UploadFile) -> tuple[list[str], list[dict], str | None]:
+async def _parse_upload(file: UploadFile | None, sheet_url: str | None = None) -> tuple[list[str], list[dict], str | None]:
     """Returns (headers, rows, pdf_warning). pdf_warning is set only for PDFs,
-    to surface upfront that extraction is best-effort."""
+    to surface upfront that extraction is best-effort. Exactly one of `file`
+    or `sheet_url` (a pasted Google Sheet link) should be provided."""
+    if sheet_url:
+        try:
+            content = svc.fetch_google_sheet_csv(sheet_url)
+        except svc.GoogleSheetError as e:
+            raise HTTPException(400, str(e))
+        headers, rows = svc.parse_file("google-sheet.csv", content)
+        return headers, rows, None
+
+    if file is None:
+        raise HTTPException(400, "Provide a file or a Google Sheet link.")
+
     content = await file.read()
     if _is_pdf(file.filename):
         headers, rows = rsvc.extract_pdf_rows(content)
@@ -37,7 +49,8 @@ async def _parse_upload(file: UploadFile) -> tuple[list[str], list[dict], str | 
 @router.post("/preview")
 async def preview_revenue(
     source_type: str = Form(...),
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    sheet_url: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -45,7 +58,7 @@ async def preview_revenue(
         raise HTTPException(400, f"Unknown source_type '{source_type}' — expected one of {list(CHANNEL_SOURCES)}")
 
     try:
-        headers, rows, pdf_warning = await _parse_upload(file)
+        headers, rows, pdf_warning = await _parse_upload(file, sheet_url)
     except rsvc.RevenuePdfError as e:
         raise HTTPException(400, str(e))
 
@@ -73,7 +86,8 @@ async def preview_revenue(
 async def match_revenue(
     source_type: str = Form(...),
     mapping: str = Form(...),
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    sheet_url: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -81,7 +95,7 @@ async def match_revenue(
         raise HTTPException(400, f"Unknown source_type '{source_type}'")
 
     try:
-        _headers, rows, _pdf_warning = await _parse_upload(file)
+        _headers, rows, _pdf_warning = await _parse_upload(file, sheet_url)
     except rsvc.RevenuePdfError as e:
         raise HTTPException(400, str(e))
 
@@ -105,7 +119,8 @@ async def commit_revenue(
     source_type: str = Form(...),
     mapping: str = Form(...),
     decisions: str = Form(...),  # JSON: [{row_index, action, reservation_id}]
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    sheet_url: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -113,7 +128,7 @@ async def commit_revenue(
         raise HTTPException(400, f"Unknown source_type '{source_type}'")
 
     try:
-        _headers, rows, _pdf_warning = await _parse_upload(file)
+        _headers, rows, _pdf_warning = await _parse_upload(file, sheet_url)
     except rsvc.RevenuePdfError as e:
         raise HTTPException(400, str(e))
 
@@ -123,6 +138,6 @@ async def commit_revenue(
 
     channel_name = SOURCE_TO_CHANNEL[source_type]
     result = rsvc.commit_revenue_decisions(db, current_user.property_id, channel_name, clean, decisions_list)
-    if not _is_pdf(file.filename):
+    if not (file and _is_pdf(file.filename)):
         svc.save_mapping(db, current_user.property_id, "revenue", mapping_dict)
     return result

@@ -56,7 +56,9 @@ async function postForm(path: string, form: FormData) {
 
 export default function RevenueReconciliation({ onReconciled }: { onReconciled?: () => void }) {
   const [sourceType, setSourceType] = useState("airbnb");
+  const [mode, setMode] = useState<"file" | "sheet">("file");
   const [file, setFile] = useState<File | null>(null);
+  const [sheetUrl, setSheetUrl] = useState("");
   const [preview, setPreview] = useState<any>(null);
   const [mapping, setMapping] = useState<Record<string, string | null>>({});
   const [matchData, setMatchData] = useState<{ matches: MatchRow[]; warnings: string[]; unmatched_count: number } | null>(null);
@@ -64,6 +66,8 @@ export default function RevenueReconciliation({ onReconciled }: { onReconciled?:
   const [loading, setLoading] = useState<"preview" | "match" | "commit" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
+
+  const hasInput = mode === "file" ? !!file : sheetUrl.trim().length > 0;
 
   function reset() {
     setPreview(null);
@@ -73,16 +77,28 @@ export default function RevenueReconciliation({ onReconciled }: { onReconciled?:
     setError(null);
   }
 
+  function buildForm(extra?: Record<string, string>) {
+    const form = new FormData();
+    form.append("source_type", sourceType);
+    if (mode === "sheet") {
+      form.append("sheet_url", sheetUrl.trim());
+    } else if (file) {
+      form.append("file", file);
+    }
+    if (extra) {
+      for (const [k, v] of Object.entries(extra)) form.append(k, v);
+    }
+    return form;
+  }
+
   async function runPreview() {
-    if (!file) return;
+    if (!hasInput) return;
     setLoading("preview");
     setError(null);
     setResult(null);
     setMatchData(null);
     try {
-      const form = new FormData();
-      form.append("source_type", sourceType);
-      form.append("file", file);
+      const form = buildForm();
       const data = await postForm("/api/revenue/preview", form);
       setPreview(data);
       setMapping(data.suggested_mapping);
@@ -94,14 +110,11 @@ export default function RevenueReconciliation({ onReconciled }: { onReconciled?:
   }
 
   async function runMatch() {
-    if (!file) return;
+    if (!hasInput) return;
     setLoading("match");
     setError(null);
     try {
-      const form = new FormData();
-      form.append("source_type", sourceType);
-      form.append("mapping", JSON.stringify(mapping));
-      form.append("file", file);
+      const form = buildForm({ mapping: JSON.stringify(mapping) });
       const data = await postForm("/api/revenue/match", form);
       setMatchData(data);
       const initial: Record<number, Decision> = {};
@@ -119,17 +132,14 @@ export default function RevenueReconciliation({ onReconciled }: { onReconciled?:
   }
 
   async function runCommit() {
-    if (!file || !matchData) return;
+    if (!hasInput || !matchData) return;
     setLoading("commit");
     setError(null);
     try {
-      const form = new FormData();
-      form.append("source_type", sourceType);
-      form.append("mapping", JSON.stringify(mapping));
-      form.append("decisions", JSON.stringify(
-        matchData.matches.map((m) => ({ row_index: m.row_index, ...decisions[m.row_index] }))
-      ));
-      form.append("file", file);
+      const form = buildForm({
+        mapping: JSON.stringify(mapping),
+        decisions: JSON.stringify(matchData.matches.map((m) => ({ row_index: m.row_index, ...decisions[m.row_index] }))),
+      });
       const data = await postForm("/api/revenue/commit", form);
       setResult(data);
       setPreview(null);
@@ -169,22 +179,63 @@ export default function RevenueReconciliation({ onReconciled }: { onReconciled?:
           </select>
         </div>
         <div>
-          <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">File (.csv, .xlsx or .pdf)</label>
-          <input
-            type="file"
-            accept=".csv,.xlsx,.xlsm,.pdf"
-            onChange={(e) => { setFile(e.target.files?.[0] || null); reset(); }}
-            className="text-sm"
-          />
+          <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">Source</label>
+          <div className="flex rounded-lg border border-taupedark overflow-hidden text-xs">
+            <button
+              type="button"
+              onClick={() => { setMode("file"); reset(); }}
+              className={`px-3 py-2 ${mode === "file" ? "bg-charcoal text-warmwhite" : "bg-white text-charcoal"}`}
+            >
+              Upload a file
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode("sheet"); reset(); }}
+              className={`px-3 py-2 ${mode === "sheet" ? "bg-charcoal text-warmwhite" : "bg-white text-charcoal"}`}
+            >
+              Google Sheet link
+            </button>
+          </div>
         </div>
+
+        {mode === "file" ? (
+          <div>
+            <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">File (.csv, .xlsx or .pdf)</label>
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xlsm,.pdf"
+              onChange={(e) => { setFile(e.target.files?.[0] || null); reset(); }}
+              className="text-sm"
+            />
+          </div>
+        ) : (
+          <div className="flex-1 min-w-[18rem]">
+            <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">Google Sheet link</label>
+            <input
+              type="url"
+              value={sheetUrl}
+              onChange={(e) => { setSheetUrl(e.target.value); reset(); }}
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              className="w-full border border-taupedark rounded-lg px-3 py-2 text-sm bg-white"
+            />
+          </div>
+        )}
+
         <button
           onClick={runPreview}
-          disabled={!file || loading !== null}
+          disabled={!hasInput || loading !== null}
           className="text-xs px-4 py-2 rounded-lg bg-charcoal text-warmwhite hover:bg-bronzedark disabled:opacity-50"
         >
           {loading === "preview" ? "Reading…" : "Preview"}
         </button>
       </div>
+
+      {mode === "sheet" && (
+        <p className="text-xs text-muted mb-4 -mt-2">
+          The sheet needs to be shared as "Anyone with the link" (Viewer) — in Google Sheets, click Share, change
+          access, then paste the link above. We only read it, nothing is ever written back to your sheet.
+        </p>
+      )}
 
       {error && <p className="text-sm text-terracotta mb-3">{error}</p>}
 

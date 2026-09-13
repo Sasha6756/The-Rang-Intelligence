@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
 
+import httpx
 import openpyxl
 from sqlalchemy.orm import Session
 
@@ -110,6 +112,67 @@ def parse_file(filename: str, content: bytes) -> tuple[list[str], list[dict]]:
         headers = reader.fieldnames or []
         rows = [dict(r) for r in reader]
         return headers, rows
+
+
+class GoogleSheetError(Exception):
+    """Any user-facing failure fetching or reading a Google Sheet link."""
+
+
+MAX_SHEET_BYTES = 10 * 1024 * 1024  # 10MB — generous for a spreadsheet export, guards against abuse
+
+
+def _parse_google_sheet_url(url: str) -> tuple[str, str | None]:
+    """Extracts (spreadsheet_id, gid) from any of the URL shapes Google hands
+    out when you open a sheet or click Share/Copy link, e.g.:
+      https://docs.google.com/spreadsheets/d/<id>/edit#gid=<gid>
+      https://docs.google.com/spreadsheets/d/<id>/edit?usp=sharing
+      https://docs.google.com/spreadsheets/d/<id>/
+    `gid` identifies which tab; omitted, Google's export endpoint defaults to
+    the first tab.
+    """
+    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
+    if not match:
+        raise GoogleSheetError(
+            "That doesn't look like a Google Sheets link — open the sheet in your browser and copy the full "
+            "URL from the address bar."
+        )
+    sheet_id = match.group(1)
+    gid_match = re.search(r"[#&?]gid=(\d+)", url)
+    gid = gid_match.group(1) if gid_match else None
+    return sheet_id, gid
+
+
+def fetch_google_sheet_csv(url: str) -> bytes:
+    """Fetches one tab of a Google Sheet as CSV via the sheet's own export
+    endpoint — read-only, nothing is ever written back to the sheet. This
+    only works when the sheet is shared as "Anyone with the link" (Viewer is
+    enough): Google serves this export URL without requiring a Google login
+    for link-shared sheets, but a private sheet redirects to a login page
+    (HTML) instead of CSV, which is treated as a sharing-settings error."""
+    sheet_id, gid = _parse_google_sheet_url(url)
+    export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+    if gid:
+        export_url += f"&gid={gid}"
+
+    try:
+        with httpx.Client(follow_redirects=True, timeout=15.0) as client:
+            resp = client.get(export_url)
+    except httpx.TimeoutException:
+        raise GoogleSheetError("The Google Sheet link timed out. Please check the link and try again.")
+    except httpx.HTTPError as e:
+        raise GoogleSheetError(f"Could not reach that Google Sheet link ({e.__class__.__name__}).")
+
+    content_type = resp.headers.get("content-type", "")
+    if resp.status_code != 200 or "html" in content_type.lower():
+        raise GoogleSheetError(
+            "Couldn't read that sheet — it may not be shared publicly, or the link is wrong. In Google "
+            'Sheets, click Share, change access to "Anyone with the link" (Viewer), then paste the link here again.'
+        )
+    if len(resp.content) > MAX_SHEET_BYTES:
+        raise GoogleSheetError("That sheet is unexpectedly large — please double-check the link.")
+    if not resp.content.strip():
+        raise GoogleSheetError("That sheet (or tab) appears to be empty.")
+    return resp.content
 
 
 def suggest_mapping(headers: list[str], source_type: str, remembered: dict | None) -> dict[str, str | None]:
