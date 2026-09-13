@@ -1,19 +1,24 @@
 import json
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user
 from app.db.database import get_db
 from app.models.core import User
 from app.models.importing import ImportBatch
+from app.models.ical_feed import ICalFeed
 from app.schemas.importing import ImportCommitResponse, SOURCE_TO_CHANNEL, SOURCE_TO_REVIEW_LABEL
 from app.services import import_service as svc
+from app.services import ical_service
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
 RESERVATION_SOURCES = {"booking_com", "airbnb", "direct"}
 REVIEW_SOURCES = set(SOURCE_TO_REVIEW_LABEL.keys())
+
+ICAL_CHANNELS = {"airbnb": "Airbnb", "booking_com": "Booking.com"}
 
 
 @router.post("/preview")
@@ -87,6 +92,40 @@ async def commit_import(
         raise HTTPException(400, f"Unknown source_type '{source_type}'")
 
     return ImportCommitResponse(batch_id=batch.id, rows_imported=batch.row_count, warnings=warnings[:50])
+
+
+class ICalSyncRequest(BaseModel):
+    channel: str  # "airbnb" | "booking_com"
+    url: str
+
+
+@router.post("/ical/sync")
+def sync_ical(payload: ICalSyncRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    channel_name = ICAL_CHANNELS.get(payload.channel)
+    if not channel_name:
+        raise HTTPException(400, f"Unknown channel '{payload.channel}' — expected one of {list(ICAL_CHANNELS)}")
+    url = payload.url.strip()
+    if not url:
+        raise HTTPException(400, "Please paste a calendar link first.")
+    try:
+        return ical_service.sync_ical_feed(db, current_user.property_id, channel_name, url)
+    except ical_service.ICalSyncError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/ical/status")
+def ical_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    feeds = db.query(ICalFeed).filter(ICalFeed.property_id == current_user.property_id).all()
+    return [
+        {
+            "channel": f.channel.name if f.channel else None,
+            "url": f.url,
+            "last_synced_at": f.last_synced_at,
+            "last_sync_status": f.last_sync_status,
+            "last_sync_message": f.last_sync_message,
+        }
+        for f in feeds
+    ]
 
 
 @router.get("/history")
