@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
 
 import openpyxl
@@ -34,12 +34,19 @@ REVIEW_FIELDS = ["review_date", "rating", "guest_country", "raw_text"]
 
 COMPETITOR_RATE_FIELDS = ["competitor_name", "date", "nightly_rate", "available", "min_stay"]
 
+# A payout/earnings report: dates identify *which* stay it paid out for (so it
+# can be matched against an existing reservation), gross_revenue is the point
+# of the whole exercise. departure_date is optional here — some payout
+# exports only give arrival + nights — see validate_revenue_rows.
+REVENUE_FIELDS = ["external_ref", "arrival_date", "departure_date", "nights", "guest_name", "gross_revenue", "commission", "currency"]
+
 FIELDS_BY_SOURCE = {
     "booking_com": RESERVATION_FIELDS,
     "airbnb": RESERVATION_FIELDS,
     "direct": RESERVATION_FIELDS,
     "reviews": REVIEW_FIELDS,
     "competitor_rates": COMPETITOR_RATE_FIELDS,
+    "revenue": REVENUE_FIELDS,
 }
 
 # common header synonyms -> system field, used for auto-suggestion
@@ -65,7 +72,15 @@ SYNONYMS: dict[str, list[str]] = {
     "nightly_rate": ["rate", "nightly rate", "price", "nightly price"],
     "available": ["available", "availability"],
     "min_stay": ["min stay", "minimum stay", "min nights"],
+    "nights": ["nights", "length of stay", "los"],
 }
+
+# Payout/earnings-report header synonyms layered on top of SYNONYMS above —
+# "amount" already maps to gross_revenue there, but payout reports use their
+# own vocabulary for the money column specifically.
+SYNONYMS["gross_revenue"] = SYNONYMS["gross_revenue"] + [
+    "payout", "host payout", "payout amount", "gross earnings", "total payout", "earnings", "you earn",
+]
 
 
 def _norm(s: str) -> str:
@@ -211,6 +226,49 @@ def validate_reservations(rows: list[dict], mapping: dict[str, str | None]) -> t
             cancellation_date=_parse_date(get("cancellation_date")),
             guest_name=(get("guest_name") or "").strip(),
             guest_country=(get("guest_country") or "Unknown").strip() or "Unknown",
+        ))
+
+    return clean, warnings
+
+
+def validate_revenue_rows(rows: list[dict], mapping: dict[str, str | None]) -> tuple[list[dict], list[str]]:
+    """A payout/earnings report only needs to identify *which stay* it paid
+    for (so it can be matched to an existing reservation) and *how much* —
+    everything else is optional. departure_date can be derived from
+    arrival_date + nights if the report doesn't give it directly."""
+    clean: list[dict] = []
+    warnings: list[str] = []
+
+    for i, row in enumerate(rows, start=2):
+        def get(field):
+            header = mapping.get(field)
+            return row.get(header, "") if header else ""
+
+        arrival_date = _parse_date(get("arrival_date"))
+        departure_date = _parse_date(get("departure_date"))
+        nights = _parse_float(get("nights"))
+        gross_revenue = _parse_float(get("gross_revenue"))
+
+        if not arrival_date:
+            warnings.append(f"Row {i}: missing/unparseable arrival date — skipped.")
+            continue
+        if not departure_date and nights:
+            departure_date = arrival_date + timedelta(days=int(nights))
+        if not departure_date:
+            warnings.append(f"Row {i}: no departure date and no nights count — skipped (can't identify the stay length).")
+            continue
+        if gross_revenue is None:
+            warnings.append(f"Row {i}: missing/unparseable revenue amount — skipped.")
+            continue
+
+        clean.append(dict(
+            external_ref=(get("external_ref") or "").strip(),
+            arrival_date=arrival_date,
+            departure_date=departure_date,
+            guest_name=(get("guest_name") or "").strip(),
+            gross_revenue=gross_revenue,
+            commission=_parse_float(get("commission")) or 0.0,
+            currency=(get("currency") or "USD").strip() or "USD",
         ))
 
     return clean, warnings
