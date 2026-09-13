@@ -179,6 +179,20 @@ def _rows_from_grid(grid: list[list[str]], source_type: str | None) -> tuple[lis
     return headers, rows
 
 
+def sample_rows_for_preview(rows: list[dict], n: int = 10) -> list[dict]:
+    """Pick a sample spread evenly across the WHOLE dataset, not just the
+    first n. A plain rows[:n] looks broken on a sheet grouped into sections
+    (e.g. bookings grouped by month) because the first n rows can all come
+    from a single section — a user with a year of bookings starting in
+    March would see only March in the preview and reasonably assume the
+    rest wasn't read, even though every row is processed on import."""
+    if len(rows) <= n:
+        return rows
+    step = len(rows) / n
+    indices = sorted({int(i * step) for i in range(n)})
+    return [rows[i] for i in indices]
+
+
 def parse_file(filename: str, content: bytes, source_type: str | None = None) -> tuple[list[str], list[dict]]:
     """Returns (headers, rows-as-dicts-of-strings). `source_type`, when
     given, narrows header detection to that source's own field vocabulary;

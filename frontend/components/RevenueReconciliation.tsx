@@ -267,6 +267,13 @@ export default function RevenueReconciliation({ onReconciled }: { onReconciled?:
             {preview.row_count} rows detected · {preview.valid_row_count} look valid with the current mapping
             {preview.total_warning_count > 0 && ` · ${preview.total_warning_count} warnings`}
           </p>
+          {preview.row_count > preview.sample_rows.length && (
+            <p className="text-xs text-muted mb-2 -mt-1">
+              The table below shows a spread of {preview.sample_rows.length} rows sampled across the whole file so
+              you can sanity-check it — not just the first few. All {preview.row_count} rows are processed when you
+              continue, not only the ones shown here.
+            </p>
+          )}
 
           <div className="mb-4">
             <div className="text-[11px] uppercase tracking-wide text-muted mb-2">Column mapping — your column → system field</div>

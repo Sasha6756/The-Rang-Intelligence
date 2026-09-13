@@ -69,7 +69,7 @@ async def preview_import(
         "headers": headers,
         "suggested_mapping": suggested,
         "system_fields": system_fields,
-        "sample_rows": rows[:8],
+        "sample_rows": svc.sample_rows_for_preview(rows),
         "row_count": len(rows),
         "valid_row_count": len(clean),
         "warnings": warnings[:50],
