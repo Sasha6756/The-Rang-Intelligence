@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  background-color: #FAF7F2;
+  color: #2B2825;
+}
+
+body {
+  font-family: -apple-system, "Inter", "Helvetica Neue", Arial, sans-serif;
+}
+
+h1, h2, h3, .font-display {
+  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+}
+
+::selection {
+  background: #EFE9E1;
+}
+
+.severity-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
