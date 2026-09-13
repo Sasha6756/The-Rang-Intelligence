@@ -60,13 +60,15 @@ def ensure_new_columns():
     explicitly, or every query touching it fails with UndefinedColumn.
 
     This is a minimal, additive-only substitute for a full migration tool:
-    it only ever adds a nullable column to a table that already exists —
-    never drops, alters, or touches existing data. New tables (like
-    exchange_rates) don't need this; create_all() already handles those."""
+    it only ever adds a nullable column to a table that already exists, or
+    loosens a NOT NULL constraint the current model no longer wants — never
+    drops, alters, or touches existing data. New tables (like exchange_rates)
+    don't need this; create_all() already handles those."""
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
     expected_columns = [
         ("properties", "default_display_currency", "VARCHAR(10)"),
+        ("reservations", "is_calendar_sync", "BOOLEAN DEFAULT FALSE"),
     ]
     for table, column, ddl_type in expected_columns:
         if table not in existing_tables:
@@ -76,6 +78,18 @@ def ensure_new_columns():
             continue
         with engine.begin() as conn:
             conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+
+    # A reservation synced from an iCal calendar link has no price at all (the
+    # feed format never exposes one) — gross_revenue/net_revenue must accept
+    # NULL for those rows. An existing Postgres database created before this
+    # was nullable in the model still has the old NOT NULL constraint; this
+    # drops it (a no-op if already nullable). Not needed on SQLite: a fresh
+    # local/demo database is always created from the current model directly,
+    # and SQLite's ALTER TABLE doesn't support this form anyway.
+    if engine.dialect.name == "postgresql" and "reservations" in existing_tables:
+        with engine.begin() as conn:
+            for column in ("gross_revenue", "net_revenue"):
+                conn.execute(text(f"ALTER TABLE reservations ALTER COLUMN {column} DROP NOT NULL"))
 
 
 @asynccontextmanager

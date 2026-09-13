@@ -26,7 +26,16 @@ def _nights_overlap(res: Reservation, start: date, end: date) -> int:
 
 
 def core_metrics(db: Session, property_id: int, start: date, end: date) -> dict:
-    """Occupancy, ADR, RevPAR, gross/net revenue for [start, end)."""
+    """Occupancy, ADR, RevPAR, gross/net revenue for [start, end).
+
+    Occupancy counts every booked night regardless of source. ADR/RevPAR/
+    revenue, however, can only be computed from nights with a known price —
+    a reservation synced from an iCal calendar link has no price at all, so
+    it contributes to occupancy but is excluded from the money figures
+    rather than being treated as $0 (which would silently understate ADR).
+    `unpriced_nights` tells the caller how many booked nights were excluded
+    this way, so the UI can flag it instead of presenting a clean number.
+    """
     available_nights = max((end - start).days, 0)
     reservations = [
         r for r in _confirmed(db, property_id)
@@ -35,23 +44,27 @@ def core_metrics(db: Session, property_id: int, start: date, end: date) -> dict:
     ]
 
     booked_nights = 0
+    priced_nights = 0
     gross = 0.0
     net = 0.0
     for r in reservations:
         n = _nights_overlap(r, start, end)
         booked_nights += n
-        share = n / r.nights if r.nights else 0
-        gross += r.gross_revenue * share
-        net += r.net_revenue * share
+        if r.gross_revenue is not None and r.nights:
+            share = n / r.nights
+            gross += r.gross_revenue * share
+            net += (r.net_revenue or 0.0) * share
+            priced_nights += n
 
     occupancy_pct = round(booked_nights / available_nights * 100, 1) if available_nights else 0.0
-    adr = round(gross / booked_nights, 2) if booked_nights else 0.0
-    revpar = round(gross / available_nights, 2) if available_nights else 0.0
+    adr = round(gross / priced_nights, 2) if priced_nights else None
+    revpar = round(gross / available_nights, 2) if available_nights and priced_nights else None
 
     return {
         "start": start, "end": end,
         "available_nights": available_nights,
         "booked_nights": booked_nights,
+        "unpriced_nights": booked_nights - priced_nights,
         "occupancy_pct": occupancy_pct,
         "adr": adr,
         "revpar": revpar,
@@ -95,12 +108,18 @@ def channel_mix(db: Session, property_id: int, start: date, end: date) -> list[d
     total_gross = 0.0
     for r in reservations:
         name = r.channel.name if r.channel else "Unknown"
-        bucket = by_channel.setdefault(name, {"channel": name, "reservations": 0, "gross_revenue": 0.0, "net_revenue": 0.0, "nights": 0})
+        bucket = by_channel.setdefault(
+            name, {"channel": name, "reservations": 0, "unpriced_reservations": 0,
+                   "gross_revenue": 0.0, "net_revenue": 0.0, "nights": 0}
+        )
         bucket["reservations"] += 1
-        bucket["gross_revenue"] += r.gross_revenue
-        bucket["net_revenue"] += r.net_revenue
         bucket["nights"] += r.nights
-        total_gross += r.gross_revenue
+        if r.gross_revenue is None:
+            bucket["unpriced_reservations"] += 1
+        else:
+            bucket["gross_revenue"] += r.gross_revenue
+            bucket["net_revenue"] += r.net_revenue or 0.0
+            total_gross += r.gross_revenue
 
     result = list(by_channel.values())
     for b in result:
@@ -111,8 +130,12 @@ def channel_mix(db: Session, property_id: int, start: date, end: date) -> list[d
 
 
 def lead_time_stats(db: Session, property_id: int, start: date, end: date) -> dict:
+    # Calendar-synced reservations (from an Airbnb/Booking iCal link) have no
+    # real booking_date — the feed only exposes stay dates — so they're
+    # excluded here rather than skewing lead time with a fabricated value.
     reservations = _confirmed(db, property_id).filter(
-        Reservation.booking_date >= start, Reservation.booking_date < end
+        Reservation.booking_date >= start, Reservation.booking_date < end,
+        Reservation.is_calendar_sync.is_(False),
     ).all()
     lead_times = [r.lead_time_days for r in reservations if r.lead_time_days is not None]
     if not lead_times:
@@ -145,9 +168,12 @@ def length_of_stay_stats(db: Session, property_id: int, start: date, end: date) 
 
 
 def cancellation_rate(db: Session, property_id: int, start: date, end: date) -> dict:
+    # Same reasoning as lead_time_stats: calendar-synced rows have no real
+    # booking_date, so they're excluded rather than misplaced in the window.
     all_res = db.query(Reservation).filter(
         Reservation.property_id == property_id,
         Reservation.booking_date >= start, Reservation.booking_date < end,
+        Reservation.is_calendar_sync.is_(False),
     ).all()
     if not all_res:
         return {"total": 0, "cancelled": 0, "rate_pct": None}

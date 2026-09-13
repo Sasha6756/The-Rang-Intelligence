@@ -42,13 +42,27 @@ class Reservation(Base):
     adults: Mapped[int] = mapped_column(Integer, default=2)
     children: Mapped[int] = mapped_column(Integer, default=0)
 
-    gross_revenue: Mapped[float] = mapped_column(Float)
+    # Nullable: a reservation synced from an iCal calendar link (Airbnb/Booking
+    # only export date ranges, not price) has no revenue figure. Analytics
+    # code must treat None as "unknown" and exclude it from ADR/RevPAR/revenue
+    # sums rather than treating it as zero — see analytics_service.py.
+    gross_revenue: Mapped[float | None] = mapped_column(Float, nullable=True)
     commission: Mapped[float] = mapped_column(Float, default=0.0)
-    net_revenue: Mapped[float] = mapped_column(Float)
+    net_revenue: Mapped[float | None] = mapped_column(Float, nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="USD")
 
     status: Mapped[ReservationStatus] = mapped_column(Enum(ReservationStatus), default=ReservationStatus.CONFIRMED)
     cancellation_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # True when booking_date (and therefore lead_time_days) is not a real,
+    # known value — set for records created from an iCal calendar sync
+    # (which never exposes a booking date) and for records backfilled from a
+    # revenue/payout report with no matching booking (same limitation).
+    # These rows have real arrival/departure dates, so they count toward
+    # occupancy, length-of-stay and channel mix; analytics that depend on
+    # booking_date — lead time, booking pace, cancellation rate — exclude
+    # them rather than compute a misleading number from a fallback date.
+    is_calendar_sync: Mapped[bool] = mapped_column(Boolean, default=False)
 
     source_detail: Mapped[str] = mapped_column(String(300), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -57,11 +71,15 @@ class Reservation(Base):
     guest: Mapped["Guest"] = relationship()
 
     @property
-    def adr(self) -> float:
-        return round(self.gross_revenue / self.nights, 2) if self.nights else 0.0
+    def adr(self) -> float | None:
+        if not self.nights or self.gross_revenue is None:
+            return None
+        return round(self.gross_revenue / self.nights, 2)
 
     @property
-    def lead_time_days(self) -> int:
+    def lead_time_days(self) -> int | None:
+        if self.is_calendar_sync:
+            return None  # booking_date is a sync-time placeholder, not real
         return (self.arrival_date - self.booking_date).days
 
 
