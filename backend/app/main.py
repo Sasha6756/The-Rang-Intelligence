@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 
 from app.core.config import get_settings
 from app.db.database import engine, Base, SessionLocal
@@ -51,9 +52,36 @@ def refresh_exchange_rates_job():
 scheduler = BackgroundScheduler(timezone="UTC")
 
 
+def ensure_new_columns():
+    """Base.metadata.create_all() only creates tables that don't exist yet —
+    it never adds a column to a table that's already there. A database that
+    predates a model change (e.g. an existing production Postgres database,
+    with real rows already in `properties`) needs that column added
+    explicitly, or every query touching it fails with UndefinedColumn.
+
+    This is a minimal, additive-only substitute for a full migration tool:
+    it only ever adds a nullable column to a table that already exists —
+    never drops, alters, or touches existing data. New tables (like
+    exchange_rates) don't need this; create_all() already handles those."""
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    expected_columns = [
+        ("properties", "default_display_currency", "VARCHAR(10)"),
+    ]
+    for table, column, ddl_type in expected_columns:
+        if table not in existing_tables:
+            continue
+        existing_columns = {c["name"] for c in inspector.get_columns(table)}
+        if column in existing_columns:
+            continue
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    ensure_new_columns()
     seed_channels()
     if settings.SEED_DEMO_DATA:
         from app.seed.demo_data import generate as generate_demo_data
